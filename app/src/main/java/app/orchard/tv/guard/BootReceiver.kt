@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.os.SystemClock
 import app.orchard.tv.MainActivity
+import app.orchard.tv.system.DexMode
+import app.orchard.tv.system.DexService
 import app.orchard.tv.system.DiagLog
 import kotlin.concurrent.thread
 
@@ -40,6 +42,8 @@ class BootReceiver : BroadcastReceiver() {
         GuardSetup.ensureEnabled(context)
         if (action == Intent.ACTION_LOCKED_BOOT_COMPLETED) return
         GuardSetup.rescanIfMissing(context)
+        // DeX may already be up: keep something listening for the next time it comes up.
+        DexService.start(context)
         // Also when Aerial is the default Home: some firmwares start their own launcher at boot
         // regardless (Skyworth/Coolita 8R145, issue #43).
         // A guard that is already running looks at what is in front before taking Home: by the time
@@ -47,6 +51,8 @@ class BootReceiver : BroadcastReceiver() {
         // has to look: on Xiaomi MiTV-MTEQ0 (Android 10) it is bound ~20 s before BOOT_COMPLETED,
         // never sees PatchWall's windows, and the take-over at bind time did not stick (issue #154).
         if (HomeGuardService.onBootCompleted()) return
+        // DeX: the desktop display is where Aerial belongs, not the phone screen.
+        if (DexMode.open(context)) return
         runCatching {
             context.startActivity(MainActivity.bringBackIntent(context))
         }

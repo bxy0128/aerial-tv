@@ -74,6 +74,7 @@ import app.orchard.tv.wallpaper.AerialFormats
 import app.orchard.tv.wallpaper.ScreensaverMode
 import app.orchard.tv.system.SystemScreensaver
 import app.orchard.tv.system.Diagnostics
+import app.orchard.tv.system.DexService
 import app.orchard.tv.system.MissingClipboard
 import app.orchard.tv.system.Sounds
 import app.orchard.tv.system.NetKind
@@ -481,6 +482,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
+        // DeX draws its taskbar back over Home whenever the window takes focus again.
+        if (hasFocus) hideSystemBars()
         DiagLog.i("window focus $hasFocus")
     }
 
@@ -740,6 +743,7 @@ class MainActivity : ComponentActivity() {
         // in credential-protected storage).
         lifecycleScope.launch(Dispatchers.IO) { PhoneServer.listen(this@MainActivity) }
         GuardSetup.ensureEnabled(this)
+        DexService.start(this)
         idleHandler.postDelayed({ GuardSetup.rebindIfStalled(this) }, 5_000)
         vm.reloadIfPackagesChanged()
         ContextCompat.registerReceiver(

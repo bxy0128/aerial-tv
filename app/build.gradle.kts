@@ -35,6 +35,14 @@ android {
             dimension = "home"
             versionNameSuffix = "-guard"
         }
+        // dex: the standard app without the HOME filters, for Samsung DeX on a phone. DeX's desktop
+        // refuses to run a Home app at all ("designed for phone Home screens", string
+        // multiwindow_desktop_policy_text_cant_run_for_home_screen in framework-res), so Aerial is
+        // only a plain app here, and system/DexService opens it on the desktop display.
+        create("dex") {
+            dimension = "home"
+            versionNameSuffix = "-dex"
+        }
     }
 
     // The TVs only accept updates signed with the key Aerial was first installed with. That key
