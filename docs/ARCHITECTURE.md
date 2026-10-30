@@ -53,7 +53,7 @@ app/src/main/java/app/orchard/tv/
 │   ├── RevivalListener.kt   通知监听服务：被强杀后由系统重绑，借此复活并重开守护；10 分钟内复活 3 次以上时，看不到前台就不再抢 HOME（乐视 #63）
 │   ├── RevivalSync.kt       同步适配器（挂在 settings 上，带一个自己的账号）：系统不许通知监听的低内存 Android 9（小米 MFTP0，#72）上，强停后约 30–60 秒由同步框架拉起 Aerial 并重开守护；守护在运行时什么都不做
 │   ├── BootReceiver.kt      真正重启后的兜底
-│   └── ConfigReceiver.kt    ADB 专用配置入口（keep_adb、own_screensaver、clear_pin、export_tiles、check_update、update_test、device_profile、list_sources、open_source），要求发送方持有 WRITE_SECURE_SETTINGS
+│   └── ConfigReceiver.kt    ADB 专用配置入口（keep_adb、own_screensaver、clear_pin、export_tiles、check_update、update_test、update_test_self、device_profile、list_sources、open_source），要求发送方持有 WRITE_SECURE_SETTINGS
 └── dream/AerialDream.kt    系统级屏保（DreamService + Compose）
 
 app/src/main/assets/aerials.json   Apple 航拍目录（114 条：地址 + 中英文地名 + 时间点说明）
@@ -189,11 +189,11 @@ NanoHTTPD 监听 8790 端口，路径前缀是 8 位随机令牌（每次打开�
 
 - **下载并安装**：先从官网 `download/aerial-<flavor>.apk` 下载，失败再从 GitHub `releases/latest/download`（不用第三方 GitHub 代理）。下载后检查包名、签名（和这台电视上的 Aerial 比）和 versionCode，不对就不打开安装器，并在页上说明原因（`Updates.Failure`）。改过包名的版本（OPPO）不显示按钮。
 - **旧系统更新 TLS**（#871）：Android 5.0–6.0 的版本检查和 APK 下载连接用 `LegacyUpdateTls`，在系统根证书之外额外信任随包的 ISRG Root X1（`raw/isrg_root_x1.pem`，来源 `https://letsencrypt.org/certs/isrgrootx1.pem`，DER SHA-256 `96bcec06264976f37460779acf28c5a7cfe8a3c0aae11a8ffcee05c0bddf08c6`）。只给这两个更新连接设置 socket factory，不改全局默认值、主机名校验或其他网络功能，Android 7 起沿用系统设置。MiTV4-ANSM0 / Android 6.0.1 上以 ADB shell 运行生产信任管理代码对比：官网版本地址两者均 HTTP 200；GitHub APK 跳到 `release-assets.githubusercontent.com` 后，系统信任库报缺少根证书，补充后 HTTP 200 并能读取 APK 数据。没有用本地签名覆盖电视上的官方 Aerial，完整应用内覆盖升级仍需官方签名版本验证。
-- **安卓 13 及以上先用安装会话**（`Updates.installBySession`，#723）：`ACTION_VIEW` 的安装在安卓 13 起记成本地文件（`packageSource=3`），系统把 `ACCESS_RESTRICTED_SETTINGS` 设成 deny，TCL T966D5（安卓 14）上守护随之被关。会话声明 `PACKAGE_SOURCE_OTHER`，系统照样弹确认（`UpdateResult` 收到 `STATUS_PENDING_USER_ACTION` 后打开确认页）；会话失败时退回下面的 `ACTION_VIEW`。已经是 deny 的不会因为后来的升级变回 allow，要 `appops set app.orchard.tv ACCESS_RESTRICTED_SETTINGS allow`。安卓 13 TV 模拟器上验证过。
-- **交给系统安装器**（安卓 12 及以下）：用 `ACTION_VIEW` + FileProvider（`res/xml/update_files.xml`，Android 7 以下用 `file://`）打开系统安装器，不用 PackageInstaller session：TCL 的安装校验只放行由 `com.android.packageinstaller` 发起的安装，`ACTION_VIEW` 时发起者就是系统安装器（和当贝一样）。要 `REQUEST_INSTALL_PACKAGES`：小米有「安装未知应用」设置页，没开时跳过去；TCL 没有这个页面，靠 `install.sh` 用 `appops set … REQUEST_INSTALL_PACKAGES allow` 放行。
+- **安卓 9 及以上先用安装会话**（`Updates.installBySession`；#723 时从安卓 13 起，1.72 改成 9 起）：会话里除了 `aerial.apk`，还写入新包自带的 `assets/aerial-dm/28.dm`（安卓 9–11，profile 格式 010）或 `31.dm`（12 起，格式 015），作为 `aerial.dm`。系统安装时就按 Baseline Profile 编译（`speed-profile`，`install-dm`）。系统安装器不读 APK 里的 `assets/dexopt`，后台编译要等设备空闲，电视开着时等不到，所以不带 `.dm` 的升级会一直不编译，主线程慢约一倍（[PERF-2026-10-30.md](PERF-2026-10-30.md)）。两份 `.dm` 由 `app/build.gradle.kts` 的 `DexMetadataAssets` 从 AGP 的 `dex_metadata_directory` 拷来，并加上 `manifest.json`（小米安卓 14 没有它就报 `INSTALL_FAILED_BAD_DEX_METADATA`）。安卓 12 起 `setRequireUserAction(USER_ACTION_NOT_REQUIRED)` 加权限 `UPDATE_PACKAGES_WITHOUT_USER_ACTION`：自己更新自己时不弹确认页。小米 MFTR0 没有会话确认页（`CONFIRM_INSTALL` 找不到 Activity），不这样做就只能退回 `ACTION_VIEW`。安卓 13 起声明 `PACKAGE_SOURCE_OTHER`（#723：`ACTION_VIEW` 的安装记成本地文件，`ACCESS_RESTRICTED_SETTINGS` 变 deny，TCL T966D5 上守护随之被关；已经是 deny 的不会变回来）。失败时逐级退回：写会话出错或系统报 `DEX_METADATA`，只带 APK 再开一次会话；会话失败、或者没有确认页（#827），退回下面的 `ACTION_VIEW`。TCL MT5879（安卓 11）的会话会弹系统确认页，也能通过 TCL 的验证器。会话装过以后，安装来源变成 `app.orchard.tv`。
+- **交给系统安装器**（安卓 8 及以下，以及会话不行时）：用 `ACTION_VIEW` + FileProvider（`res/xml/update_files.xml`，Android 7 以下用 `file://`）打开系统安装器。TCL 的安装校验原以为只放行由 `com.android.packageinstaller` 发起的安装（`ACTION_VIEW` 时发起者就是系统安装器，和当贝一样）；1.72 实测 MT5879 上会话安装也能通过。要 `REQUEST_INSTALL_PACKAGES`：小米有「安装未知应用」设置页，没开时跳过去；TCL 没有这个页面，靠 `install.sh` 用 `appops set … REQUEST_INSTALL_PACKAGES allow` 放行。
 - **装完回到 Aerial**：安装会杀掉 Aerial 的任务，露出底下的东西（小米上是 PatchWall 的详情页，不是原桌面的 HOME Activity，守护原来的规则不管）。所以打开安装器前记下时间（`GuardSetup.noteInstallerOpened`，用 commit 立刻写盘），新进程的守护在 15 分钟内看到原桌面的任意页面就拉回 Aerial；在安装器里取消、回到 Aerial 时清掉这个记录。
 - **二维码**：装不上的电视（以及 1.31 及以前的版本）还是要再运行一次安装命令。升级页不再显示长命令，而是一个二维码，打开 `https://aerial.qust.me/update/#v=…&f=…&tv=<局域网IP>`（参数放在 `#` 后面，浏览器不会发给服务器），页面上先是 Agent 提示词，再是电视上的按钮说明和可复制的安装命令。
-- 测试：`ConfigReceiver --ez check_update true` 立刻检查新版本；`--ez update_test true` 让「下载并安装」改用 `Android/data/app.orchard.tv/files/update-test.apk`（到 Aerial 重启为止），发版前就能测整条流程。做法：装一个只把 `versionName` 改低的包，推一个带新代码的包当 update-test.apk。
+- 测试：`ConfigReceiver --ez check_update true` 立刻检查新版本；`--ez update_test true` 让「下载并安装」改用 `Android/data/app.orchard.tv/files/update-test.apk`（到 Aerial 重启为止），发版前就能测整条流程。做法：装一个只把 `versionName` 改低的包，推一个带新代码的包当 update-test.apk。shell 写不了 `Android/data` 的电视（TCL MT5879）用 `--ez update_test_self true`：重装 Aerial 自己正在运行的 APK。
 
 ## 诊断报告（system/Diagnostics.kt）
 
